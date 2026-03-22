@@ -4,7 +4,7 @@ import Image from "next/image";
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import type { AnalysisResult } from "@/lib/types";
 
-const acceptedFormats = "image/png,image/jpeg,image/webp";
+const acceptedFormats = "image/*,.heic,.heif,.HEIC,.HEIF";
 const maxFileSize = 4 * 1024 * 1024;
 
 export default function HomePage() {
@@ -22,25 +22,38 @@ export default function HomePage() {
     };
   }, [previewUrl]);
 
-  const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const nextFile = event.target.files?.[0] ?? null;
+  const onFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const nextRawFile = event.target.files?.[0] ?? null;
 
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
     }
 
-    if (nextFile && nextFile.size > maxFileSize) {
+    try {
+      const nextFile = await normalizeImageFile(nextRawFile);
+
+      if (nextFile && nextFile.size > maxFileSize) {
+        setFile(null);
+        setPreviewUrl(null);
+        setResult(null);
+        setError("图片请控制在 4MB 以内，避免直传给视觉模型时超出限制。");
+        return;
+      }
+
+      setFile(nextFile);
+      setResult(null);
+      setError(null);
+      setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : null);
+    } catch (fileError) {
       setFile(null);
       setPreviewUrl(null);
       setResult(null);
-      setError("图片请控制在 4MB 以内，避免直传给视觉模型时超出限制。");
-      return;
+      setError(
+        fileError instanceof Error
+          ? fileError.message
+          : "图片处理失败，请换一张照片再试"
+      );
     }
-
-    setFile(nextFile);
-    setResult(null);
-    setError(null);
-    setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : null);
   };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -110,7 +123,7 @@ export default function HomePage() {
               />
             </label>
             <p className="hint">
-              支持 JPG / PNG / WEBP，建议上传半身或全身照，文件控制在 4MB 以内。
+              支持 JPG / JPEG / PNG / WEBP，也支持 iPhone 的 HEIC / HEIF，上传前会自动转成 JPEG。
             </p>
           </div>
 
@@ -218,4 +231,42 @@ function readFileAsDataUrl(file: File) {
     reader.onerror = () => reject(new Error("图片读取失败"));
     reader.readAsDataURL(file);
   });
+}
+
+async function normalizeImageFile(file: File | null) {
+  if (!file) {
+    return null;
+  }
+
+  if (!isHeifFile(file)) {
+    return file;
+  }
+
+  const { default: heic2any } = await import("heic2any");
+  const output = await heic2any({
+    blob: file,
+    toType: "image/jpeg",
+    quality: 0.9
+  });
+
+  const convertedBlob = Array.isArray(output) ? output[0] : output;
+
+  if (!(convertedBlob instanceof Blob)) {
+    throw new Error("HEIC 图片转换失败，请换一张照片再试。");
+  }
+
+  const nextName = file.name.replace(/\.(heic|heif)$/i, ".jpg");
+  return new File([convertedBlob], nextName, {
+    type: "image/jpeg",
+    lastModified: Date.now()
+  });
+}
+
+function isHeifFile(file: File) {
+  const mimeType = file.type.toLowerCase();
+  return (
+    mimeType === "image/heic" ||
+    mimeType === "image/heif" ||
+    /\.(heic|heif)$/i.test(file.name)
+  );
 }
