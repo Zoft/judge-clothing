@@ -128,7 +128,6 @@ export async function analyzeOutfitPhoto(
   input: AnalyzePhotoRequest
 ): Promise<AnalysisResult> {
   const apiKey = getEnv("VISION_API_KEY");
-  console.log(apiKey);
   const model = getEnv("VISION_MODEL");
 
   if (!apiKey || !model) {
