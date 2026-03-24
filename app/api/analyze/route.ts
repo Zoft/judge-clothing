@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { analyzeOutfitPhoto } from "@/lib/vision-client";
 import type { AnalyzePhotoRequest } from "@/lib/types";
 
+export const runtime = 'edge';
+
 export async function POST(request: Request) {
   const body = (await request.json()) as Partial<AnalyzePhotoRequest>;
 
