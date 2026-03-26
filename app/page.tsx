@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
+import imageCompression from "browser-image-compression";
 import type { AnalysisResult } from "@/lib/types";
 
 const acceptedFormats = "image/*,.heic,.heif,.HEIC,.HEIF";
@@ -13,6 +14,7 @@ export default function HomePage() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [progressStage, setProgressStage] = useState<'idle' | 'uploading' | 'analyzing' | 'generating'>('idle');
 
   useEffect(() => {
     return () => {
@@ -29,6 +31,8 @@ export default function HomePage() {
       URL.revokeObjectURL(previewUrl);
     }
 
+    setProgressStage('uploading');
+
     try {
       const nextFile = await normalizeImageFile(nextRawFile);
 
@@ -37,13 +41,26 @@ export default function HomePage() {
         setPreviewUrl(null);
         setResult(null);
         setError("图片请控制在 4MB 以内，避免直传给视觉模型时超出限制。");
+        setProgressStage('idle');
         return;
       }
 
-      setFile(nextFile);
+      // 压缩图片以减少传输时间
+      let compressedFile = nextFile;
+      if (nextFile) {
+        const options = {
+          maxSizeMB: 2, // 最大 2MB
+          maxWidthOrHeight: 1920, // 最大尺寸
+          useWebWorker: true,
+        };
+        compressedFile = await imageCompression(nextFile, options);
+      }
+
+      setFile(compressedFile);
       setResult(null);
       setError(null);
-      setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : null);
+      setPreviewUrl(compressedFile ? URL.createObjectURL(compressedFile) : null);
+      setProgressStage('idle');
     } catch (fileError) {
       setFile(null);
       setPreviewUrl(null);
@@ -53,6 +70,7 @@ export default function HomePage() {
           ? fileError.message
           : "图片处理失败，请换一张照片再试"
       );
+      setProgressStage('idle');
     }
   };
 
@@ -66,6 +84,7 @@ export default function HomePage() {
     }
 
     setIsSubmitting(true);
+    setProgressStage('analyzing');
 
     try {
       const imageDataUrl = await readFileAsDataUrl(file);
@@ -87,12 +106,15 @@ export default function HomePage() {
         throw new Error(errorPayload?.error ?? "分析请求失败");
       }
 
+      setProgressStage('generating');
       const data = (await response.json()) as AnalysisResult;
       setResult(data);
+      setProgressStage('idle');
     } catch (submitError) {
       setError(
         submitError instanceof Error ? submitError.message : "服务暂时不可用"
       );
+      setProgressStage('idle');
     } finally {
       setIsSubmitting(false);
     }
@@ -134,7 +156,14 @@ export default function HomePage() {
           </div>
 
           <button className="primary-button" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "分析中..." : "开始评分"}
+            {isSubmitting ? (
+              <>
+                <span className="loading-spinner"></span>
+                分析中...
+              </>
+            ) : (
+              "开始评分"
+            )}
           </button>
 
           {error ? <p className="error-text">{error}</p> : null}
